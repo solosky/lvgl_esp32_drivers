@@ -91,6 +91,8 @@ void disp_driver_rounder(lv_disp_drv_t * disp_drv, lv_area_t * area)
     jd79653a_lv_rounder_cb(disp_drv, area);
 #elif defined CONFIG_LV_TFT_DISPLAY_CONTROLLER_UC8151D
     uc8151d_lv_rounder_cb(disp_drv, area);
+#elif defined CONFIG_LV_TFT_DISPLAY_CONTROLLER_ST7789
+    st7789_rounder_cb(disp_drv, area);
 #endif
 }
 

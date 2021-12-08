@@ -112,6 +112,7 @@ extern "C"
 
 void st7789_init(void);
 void st7789_flush(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_map);
+void st7789_rounder_cb(lv_disp_drv_t * disp_drv, lv_area_t * area);
 void st7789_enable_backlight(bool backlight);
 
 #ifdef __cplusplus

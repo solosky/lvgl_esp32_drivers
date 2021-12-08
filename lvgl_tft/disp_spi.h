@@ -40,6 +40,7 @@ typedef enum _disp_spi_send_flag_t {
     DISP_SPI_MODE_QIO           = 0x00000800, 
     DISP_SPI_MODE_DIOQIO_ADDR   = 0x00001000, 
 	DISP_SPI_VARIABLE_DUMMY		= 0x00002000,
+    DISP_SPI_DC_BIT             = 0x00004000
 } disp_spi_send_flag_t;
 
 
@@ -66,6 +67,10 @@ void disp_spi_release(void);
 
 static inline void disp_spi_send_data(uint8_t *data, size_t length) {
     disp_spi_transaction(data, length, DISP_SPI_SEND_POLLING, NULL, 0, 0);
+}
+
+static inline void disp_spi_send_data_dc(uint8_t *data, size_t length, uint8_t dc) {
+    disp_spi_transaction(data, length, DISP_SPI_SEND_POLLING | DISP_SPI_DC_BIT, NULL, dc, 0);
 }
 
 static inline void disp_spi_send_colors(uint8_t *data, size_t length) {
