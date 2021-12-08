@@ -125,11 +125,12 @@ void disp_spi_add_device_with_speed(spi_host_device_t host, int clock_speed_hz)
     spi_device_interface_config_t devcfg={
         .clock_speed_hz = clock_speed_hz,
         .mode = SPI_TFT_SPI_MODE,
-        .spics_io_num=DISP_SPI_CS,              // CS pin
+        .spics_io_num= DISP_SPI_CS,              // CS pin
         .input_delay_ns=DISP_SPI_INPUT_DELAY_NS,
         .queue_size=SPI_TRANSACTION_POOL_SIZE,
-        .pre_cb=NULL,
+        .pre_cb= NULL,
         .post_cb=NULL,
+        .flags = SPICOMMON_BUSFLAG_IOMUX_PINS,
 #if defined(DISP_SPI_HALF_DUPLEX)
         .flags = SPI_DEVICE_NO_DUMMY | SPI_DEVICE_HALFDUPLEX,	/* dummy bits should be explicitly handled via DISP_SPI_VARIABLE_DUMMY as needed */
 #else
@@ -216,6 +217,8 @@ void disp_spi_transaction(const uint8_t *data, size_t length,
         t.address_bits = 24;
     } else if (flags & DISP_SPI_ADDRESS_32) {
         t.address_bits = 32;
+    }else if(flags & DISP_SPI_DC_BIT){ //reuse addressbit as dc bit
+        t.address_bits = 1;
     }
     if (t.address_bits) {
         t.base.addr = addr;
@@ -310,12 +313,7 @@ static void IRAM_ATTR spi_ready(spi_transaction_t *trans)
         disp = lv_refr_get_disp_refreshing();
 #endif
 
-#if LVGL_VERSION_MAJOR < 8
         lv_disp_flush_ready(&disp->driver);
-#else
-        lv_disp_flush_ready(disp->driver);
-#endif
-
     }
 
     if (chained_post_cb) {

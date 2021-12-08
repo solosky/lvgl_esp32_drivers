@@ -14,6 +14,7 @@
 
 #include "disp_spi.h"
 #include "driver/gpio.h"
+#include <math.h>
 
 /*********************
  *      DEFINES
@@ -33,9 +34,20 @@ typedef struct {
 /**********************
  *  STATIC PROTOTYPES
  **********************/
+
+static uint8_t* shadow_buff;
+
+
 static void st7789_set_orientation(uint8_t orientation);
 
-static void st7789_send_color(void *data, size_t length);
+static void st7789_send_cmd(uint8_t cmd);
+static void st7789_send_data(void *data, uint16_t length);
+static void st7789_send_color(void *data, uint16_t length);
+
+void st7789_init_shadow_buff();
+static uint16_t st7789_encode_header(uint8_t* buff, lv_area_t * area);
+static uint16_t st7789_encode_data(uint8_t* buff, uint8_t* data, uint16_t length);
+
 
 /**********************
  *  STATIC VARIABLES
@@ -50,6 +62,7 @@ static void st7789_send_color(void *data, size_t length);
  **********************/
 void st7789_init(void)
 {
+    /*
     lcd_init_cmd_t st7789_init_cmds[] = {
         {0xCF, {0x00, 0x83, 0X30}, 3},
         {0xED, {0x64, 0x03, 0X12, 0X81}, 4},
@@ -83,19 +96,45 @@ void st7789_init(void)
         {ST7789_SLPOUT, {0}, 0x80},
         {ST7789_DISPON, {0}, 0x80},
         {0, {0}, 0xff},
+    };*/
+
+
+        lcd_init_cmd_t st7789_init_cmds[] = {
+        {0x11, {0}, 0x80},
+        {0x36, {0}, 1},
+        {0x3a, {0x05}, 1},
+        {0xb2, {0x0c, 0x0c, 0x00, 0x33, 0x33}, 5},
+        {0xb7, {0x35}, 1},
+        {0xbb, {0x1f}, 1},
+        {0xc0, {0x2c}, 1},
+        {0xc2, {0x01}, 1},
+        {0xc3, {0x1d}, 1},
+        {0xc4, {0x20}, 1},
+        {0xc6, {0x0f},1},
+        {0xd0, {0xa4, 0xa1},2},
+        {0xe4, {0x27, 0x00, 0x10}, 3},
+        {0xe0, {0xd0, 0x00, 0x14, 0x15, 0x13, 0x2c, 0x42, 0x43, 0x4e, 0x09, 0x16, 0x14, 0x18, 0x21}, 14},
+        {0xe1, {0xd0, 0x00, 0x14, 0x15, 0x13, 0x0b, 0x43, 0x55, 0x53, 0x0c, 0x17, 0x14, 0x23, 0x20}, 14},
+        {0x29, {0}, 0},
+        {0, {0}, 0xff},
     };
 
     //Initialize non-SPI GPIOs
     gpio_pad_select_gpio(ST7789_DC);
     gpio_set_direction(ST7789_DC, GPIO_MODE_OUTPUT);
 
-#if !defined(ST7789_SOFT_RST)
+#if !defined(CONFIG_LV_DISP_ST7789_SOFT_RESET)
     gpio_pad_select_gpio(ST7789_RST);
     gpio_set_direction(ST7789_RST, GPIO_MODE_OUTPUT);
 #endif
 
+#if ST7789_ENABLE_BACKLIGHT_CONTROL
+    gpio_pad_select_gpio(ST7789_BCKL);
+    gpio_set_direction(ST7789_BCKL, GPIO_MODE_OUTPUT);
+#endif
+
     //Reset the display
-#if !defined(ST7789_SOFT_RST)
+#if !defined(CONFIG_LV_DISP_ST7789_SOFT_RESET)
     gpio_set_level(ST7789_RST, 0);
     vTaskDelay(100 / portTICK_RATE_MS);
     gpio_set_level(ST7789_RST, 1);
@@ -117,7 +156,41 @@ void st7789_init(void)
         cmd++;
     }
 
-    st7789_set_orientation(CONFIG_LV_DISPLAY_ORIENTATION);
+    st7789_enable_backlight(true);
+
+
+    st7789_init_shadow_buff();
+
+    //st7789_set_orientation(CONFIG_LV_DISPLAY_ORIENTATION);
+}
+
+
+void st7789_enable_backlight(bool backlight)
+{
+#if ST7789_ENABLE_BACKLIGHT_CONTROL
+    printf("%s backlight.\n", backlight ? "Enabling" : "Disabling");
+    uint32_t tmp = 0;
+
+#if (ST7789_BCKL_ACTIVE_LVL==1)
+    tmp = backlight ? 1 : 0;
+#else
+    tmp = backlight ? 0 : 1;
+#endif
+
+    gpio_set_level(ST7789_BCKL, tmp);
+#endif
+}
+
+void st7789_rounder_cb(lv_disp_drv_t * disp_drv, lv_area_t * area)
+{
+  /* Update the areas as needed.
+   * For example it makes the area to start only on 8th rows and have Nx8 pixel height.*/
+   area->x1 = ((area->x1) & 0xFFFFFFF8);
+   area->x2 = ((area->x2 + 1) & 0xFFFFFFF8) + 7;
+   uint8_t hor_max = disp_drv->hor_res;
+   if(area->x2 > hor_max -1){
+       area->x2 = hor_max - 1;
+   }
 }
 
 /* The ST7789 display controller can drive 320*240 displays, when using a 240*240
@@ -125,75 +198,40 @@ void st7789_init(void)
  * account that gap, this is not necessary in all orientations. */
 void st7789_flush(lv_disp_drv_t * drv, const lv_area_t * area, lv_color_t * color_map)
 {
-    uint8_t data[4] = {0};
+    uint16_t pos = 0;
 
-    uint16_t offsetx1 = area->x1;
-    uint16_t offsetx2 = area->x2;
-    uint16_t offsety1 = area->y1;
-    uint16_t offsety2 = area->y2;
-
-#if (CONFIG_LV_TFT_DISPLAY_OFFSETS)
-    offsetx1 += CONFIG_LV_TFT_DISPLAY_X_OFFSET;
-    offsetx2 += CONFIG_LV_TFT_DISPLAY_X_OFFSET;
-    offsety1 += CONFIG_LV_TFT_DISPLAY_Y_OFFSET;
-    offsety2 += CONFIG_LV_TFT_DISPLAY_Y_OFFSET;
-
-#elif (LV_HOR_RES_MAX == 240) && (LV_VER_RES_MAX == 240)
-#if (CONFIG_LV_DISPLAY_ORIENTATION_PORTRAIT)
-    offsetx1 += 80;
-    offsetx2 += 80;
-#elif (CONFIG_LV_DISPLAY_ORIENTATION_LANDSCAPE_INVERTED)
-    offsety1 += 80;
-    offsety2 += 80;
-#endif
-#endif
-
-    /*Column addresses*/
-    st7789_send_cmd(ST7789_CASET);
-    data[0] = (offsetx1 >> 8) & 0xFF;
-    data[1] = offsetx1 & 0xFF;
-    data[2] = (offsetx2 >> 8) & 0xFF;
-    data[3] = offsetx2 & 0xFF;
-    st7789_send_data(data, 4);
-
-    /*Page addresses*/
-    st7789_send_cmd(ST7789_RASET);
-    data[0] = (offsety1 >> 8) & 0xFF;
-    data[1] = offsety1 & 0xFF;
-    data[2] = (offsety2 >> 8) & 0xFF;
-    data[3] = offsety2 & 0xFF;
-    st7789_send_data(data, 4);
-
-    /*Memory write*/
-    st7789_send_cmd(ST7789_RAMWR);
-
-    size_t size = (size_t)lv_area_get_width(area) * (size_t)lv_area_get_height(area);
-
-    st7789_send_color((void*)color_map, size * 2);
-
+    pos = st7789_encode_header(shadow_buff, area);
+    uint32_t size = lv_area_get_width(area) * lv_area_get_height(area);
+    pos = st7789_encode_data(shadow_buff + pos, (void*) color_map, size * 2);
+    st7789_send_color((void*)shadow_buff, pos);
+    printf("flush:(%d,%d), (%d, %d)\n", area->x1, area->y1, area->x2, area->y2);
 }
 
 /**********************
  *   STATIC FUNCTIONS
  **********************/
-void st7789_send_cmd(uint8_t cmd)
+static void st7789_send_cmd(uint8_t cmd)
 {
     disp_wait_for_pending_transactions();
-    gpio_set_level(ST7789_DC, 0);
-    disp_spi_send_data(&cmd, 1);
+   // gpio_set_level(ST7789_DC, 0);
+    disp_spi_send_data_dc(&cmd, 1, 0);
+    //disp_spi_send_data(&cmd, 1);
 }
 
-void st7789_send_data(void * data, uint16_t length)
+static void st7789_send_data(void * data, uint16_t length)
 {
     disp_wait_for_pending_transactions();
-    gpio_set_level(ST7789_DC, 1);
-    disp_spi_send_data(data, length);
+   // gpio_set_level(ST7789_DC, 1);
+    for(uint16_t i=0; i<length; i++){
+        disp_spi_send_data_dc(&data[i], 1, 1);
+        //disp_spi_send_data(&data[i], 1);
+    }
+    
 }
 
-static void st7789_send_color(void * data, size_t length)
+static void st7789_send_color(void * data, uint16_t length)
 {
     disp_wait_for_pending_transactions();
-    gpio_set_level(ST7789_DC, 1);
     disp_spi_send_colors(data, length);
 }
 
@@ -220,4 +258,90 @@ static void st7789_set_orientation(uint8_t orientation)
 
     st7789_send_cmd(ST7789_MADCTL);
     st7789_send_data((void *) &data[orientation], 1);
+}
+
+
+void st7789_init_shadow_buff()
+{
+    const uint32_t dis_buff_size = DISP_BUF_SIZE * sizeof(lv_color_t);
+    uint32_t shadow_buff_size = ceil( dis_buff_size * 1.125f ) + 18; // factor 9/8
+    shadow_buff = heap_caps_malloc(shadow_buff_size, MALLOC_CAP_DMA);
+    printf("shadow buff: dis_buf_size=%d bytes, shadow_buf_size=%d\n", dis_buff_size, shadow_buff_size);
+    assert(shadow_buff != NULL);
+}
+
+
+uint16_t st7789_encode_header(uint8_t* buff, lv_area_t * area){
+
+     uint8_t data[4] = {0};
+
+    uint16_t offsetx1 = area->x1;
+    uint16_t offsetx2 = area->x2;
+    uint16_t offsety1 = area->y1;
+    uint16_t offsety2 = area->y2;
+
+#if (CONFIG_LV_TFT_DISPLAY_OFFSETS)
+    offsetx1 += CONFIG_LV_TFT_DISPLAY_X_OFFSET;
+    offsetx2 += CONFIG_LV_TFT_DISPLAY_X_OFFSET;
+    offsety1 += CONFIG_LV_TFT_DISPLAY_Y_OFFSET;
+    offsety2 += CONFIG_LV_TFT_DISPLAY_Y_OFFSET;
+
+#elif (LV_HOR_RES_MAX == 240) && (LV_VER_RES_MAX == 240)
+#if (CONFIG_LV_DISPLAY_ORIENTATION_PORTRAIT)
+    offsetx1 += 80;
+    offsetx2 += 80;
+#elif (CONFIG_LV_DISPLAY_ORIENTATION_LANDSCAPE_INVERTED)
+    offsety1 += 80;
+    offsety2 += 80;
+#endif
+#endif
+
+
+    data[0] = (offsetx1 >> 8) & 0xFF;
+    data[1] = offsetx1 & 0xFF;
+    data[2] = (offsetx2 >> 8) & 0xFF;
+    data[3] = offsetx2 & 0xFF;
+    
+    buff[0] =  ST7789_CASET >> 1;
+    buff[1] = ( ST7789_CASET << 7)| 0x40 | (data[0] >> 2);
+    buff[2] = (data[0] << 6) | 0x20 | (data[1] >> 3);
+    buff[3] = (data[1] << 5) | 0x10 | (data[2] >> 4);
+    buff[4] = (data[2] << 4) | 0x8 | (data[3] >> 5);
+    buff[5] = (data[3] << 3) | 0x0  | (ST7789_RASET >> 6);
+
+    data[0] = (offsety1 >> 8) & 0xFF;
+    data[1] = offsety1 & 0xFF;
+    data[2] = (offsety2 >> 8) & 0xFF;
+    data[3] = offsety2 & 0xFF;
+
+    buff[6] = (ST7789_RASET << 2) | 0x2  | (data[0] >> 7);
+    buff[7] = (data[0] << 1) | 0x1;
+    buff[8] = data[1];
+    buff[9] = 0x80 | (data[2] >> 1);
+    buff[10] = (data[2] << 7) | 0x40 | (data[3] >> 2);
+    buff[11] = (data[3] << 6);
+    buff[12] = 0;
+    buff[13] = 0;
+    buff[14] = 0;
+    buff[15] = 0;
+    buff[16] = 0;
+    buff[17] = ST7789_RAMWR;
+
+    return 18;
+
+}
+
+uint16_t st7789_encode_data(uint8_t* buff, uint8_t* data, uint16_t length){
+    for(uint16_t i = 0, j = 0; i< length; i+=8, j+=9){
+        buff[j] = 0x80 | (data[i]>>1);
+        buff[j + 1] = (data[i] << 7) | 0x40 | (data[i+1]>>2);
+        buff[j + 2] = (data[i + 1] << 6) | 0x20 | (data[i+2]>>3);
+        buff[j + 3] = (data[i + 2] << 5) | 0x10 | (data[i+3]>>4);
+        buff[j + 4] = (data[i + 3] << 4) | 0x8 | (data[i+4]>>5);
+        buff[j + 5] = (data[i + 4] << 3) | 0x4 | (data[i+5]>>6);
+        buff[j + 6] = (data[i + 5] << 2) | 0x2 | (data[i+6]>>7);
+        buff[j + 7] = (data[i + 6] << 1) | 0x1;
+        buff[j + 8] = data[i + 7];
+    }
+    return ( length >> 3 ) * 9;
 }
