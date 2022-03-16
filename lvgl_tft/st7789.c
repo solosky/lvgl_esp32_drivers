@@ -331,17 +331,120 @@ uint16_t st7789_encode_header(uint8_t* buff, lv_area_t * area){
 
 }
 
-uint16_t st7789_encode_data(uint8_t* buff, uint8_t* data, uint16_t length){
-    for(uint16_t i = 0, j = 0; i< length; i+=8, j+=9){
-        buff[j] = 0x80 | (data[i]>>1);
-        buff[j + 1] = (data[i] << 7) | 0x40 | (data[i+1]>>2);
-        buff[j + 2] = (data[i + 1] << 6) | 0x20 | (data[i+2]>>3);
-        buff[j + 3] = (data[i + 2] << 5) | 0x10 | (data[i+3]>>4);
-        buff[j + 4] = (data[i + 3] << 4) | 0x8 | (data[i+4]>>5);
-        buff[j + 5] = (data[i + 4] << 3) | 0x4 | (data[i+5]>>6);
-        buff[j + 6] = (data[i + 5] << 2) | 0x2 | (data[i+6]>>7);
-        buff[j + 7] = (data[i + 6] << 1) | 0x1;
-        buff[j + 8] = data[i + 7];
+static void st7789_encode_8b_fully(uint8_t *buff, uint8_t *data) {
+    buff[0] = 0x80 | (data[0] >> 1);
+    buff[1] = (data[0] << 7) | 0x40 | (data[1] >> 2);
+    buff[2] = (data[1] << 6) | 0x20 | (data[2] >> 3);
+    buff[3] = (data[2] << 5) | 0x10 | (data[3] >> 4);
+    buff[4] = (data[3] << 4) | 0x8 | (data[4] >> 5);
+    buff[5] = (data[4] << 3) | 0x4 | (data[5] >> 6);
+    buff[6] = (data[5] << 2) | 0x2 | (data[6] >> 7);
+    buff[7] = (data[6] << 1) | 0x1;
+    buff[8] = data[7];
+}
+
+static void st7789_encode_8b_last(uint8_t *buff, uint8_t *data, uint8_t mod) {
+    switch (mod) {
+        case 7: {
+            buff[0] = 0x80 | (data[0] >> 1);
+            buff[1] = (data[0] << 7) | 0x40 | (data[1] >> 2);
+            buff[2] = (data[1] << 6) | 0x20 | (data[2] >> 3);
+            buff[3] = (data[2] << 5) | 0x10 | (data[3] >> 4);
+            buff[4] = (data[3] << 4) | 0x8 | (data[4] >> 5);
+            buff[5] = (data[4] << 3) | 0x4 | (data[5] >> 6);
+            buff[6] = (data[5] << 2) | 0x2 | (data[6] >> 7);
+            buff[7] = (data[6] << 1);
+            buff[8] = 0;
+        }
+            break;
+        case 6: {
+            buff[0] = 0x80 | (data[0] >> 1);
+            buff[1] = (data[0] << 7) | 0x40 | (data[1] >> 2);
+            buff[2] = (data[1] << 6) | 0x20 | (data[2] >> 3);
+            buff[3] = (data[2] << 5) | 0x10 | (data[3] >> 4);
+            buff[4] = (data[3] << 4) | 0x8 | (data[4] >> 5);
+            buff[5] = (data[4] << 3) | 0x4 | (data[5] >> 6);
+            buff[6] = (data[5] << 2);
+            buff[7] = 0;
+            buff[8] = 0;
+        }
+            break;
+
+        case 5: {
+            buff[0] = 0x80 | (data[0] >> 1);
+            buff[1] = (data[0] << 7) | 0x40 | (data[1] >> 2);
+            buff[2] = (data[1] << 6) | 0x20 | (data[2] >> 3);
+            buff[3] = (data[2] << 5) | 0x10 | (data[3] >> 4);
+            buff[4] = (data[3] << 4) | 0x8 | (data[4] >> 5);
+            buff[5] = (data[4] << 3);
+            buff[6] = 0;
+            buff[7] = 0;
+            buff[8] = 0;
+        }
+            break;
+
+        case 4: {
+            buff[0] = 0x80 | (data[0] >> 1);
+            buff[1] = (data[0] << 7) | 0x40 | (data[1] >> 2);
+            buff[2] = (data[1] << 6) | 0x20 | (data[2] >> 3);
+            buff[3] = (data[2] << 5) | 0x10 | (data[3] >> 4);
+            buff[4] = (data[3] << 4);
+            buff[5] = 0;
+            buff[6] = 0;
+            buff[7] = 0;
+            buff[8] = 0;
+        }
+            break;
+
+        case 3: {
+            buff[0] = 0x80 | (data[0] >> 1);
+            buff[1] = (data[0] << 7) | 0x40 | (data[1] >> 2);
+            buff[2] = (data[1] << 6) | 0x20 | (data[2] >> 3);
+            buff[3] = (data[2] << 5);
+            buff[4] = 0;
+            buff[5] = 0;
+            buff[6] = 0;
+            buff[7] = 0;
+            buff[8] = 0;
+        }
+            break;
+
+        case 2: {
+            buff[0] = 0x80 | (data[0] >> 1);
+            buff[1] = (data[0] << 7) | 0x40 | (data[1] >> 2);
+            buff[2] = (data[1] << 6);
+            buff[3] = 0;
+            buff[4] = 0;
+            buff[5] = 0;
+            buff[6] = 0;
+            buff[7] = 0;
+            buff[8] = 0;
+        }
+            break;
+        case 1: {
+            buff[0] = 0x80 | (data[0] >> 1);
+            buff[1] = (data[0] << 7);
+            buff[2] = 0;
+            buff[3] = 0;
+            buff[4] = 0;
+            buff[5] = 0;
+            buff[6] = 0;
+            buff[7] = 0;
+            buff[8] = 0;
+        }
+            break;
     }
-    return ( length >> 3 ) * 9;
+}
+
+
+static uint16_t st7789_encode_data(uint8_t *buff, uint8_t *data, uint16_t length) {
+    uint8_t mod = length & 7;
+    uint16_t i = 0, j = 0;
+    for (; i < length - mod; i += 8, j += 9) {
+        st7789_encode_8b_fully(buff + j, data + i);
+    }
+    if (mod > 0) {
+        st7789_encode_8b_last(buff + j, data + i, mod);
+    }
+    return ((length >> 3) + (mod > 0 ? 1 : 0)) * 9;
 }
