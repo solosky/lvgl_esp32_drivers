@@ -202,7 +202,7 @@ void st7789_flush(lv_disp_drv_t * drv, const lv_area_t * area, lv_color_t * colo
 
     pos = st7789_encode_header(shadow_buff, area);
     uint32_t size = lv_area_get_width(area) * lv_area_get_height(area);
-    pos = st7789_encode_data(shadow_buff + pos, (void*) color_map, size * 2);
+    pos += st7789_encode_data(shadow_buff + pos, (void*) color_map, size * 2);
     st7789_send_color((void*)shadow_buff, pos);
     printf("flush:(%d,%d), (%d, %d)\n", area->x1, area->y1, area->x2, area->y2);
 }
